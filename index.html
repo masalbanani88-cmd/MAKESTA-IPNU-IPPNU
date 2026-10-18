@@ -675,6 +675,9 @@ a.contact-item:hover { transform: translateY(-4px); box-shadow: var(--shadow-sof
 
 /* Perapian area bukti pembayaran dan tautan grup WhatsApp agar sejajar dengan field lain */
 #bayarUploadField { width: 100%; min-width: 0; }
+.info-bayar { display: flex; gap: 10px; align-items: flex-start; margin: 0 0 16px; padding: 14px 16px; background: #FFF8E1; border: 1px solid #F0D98A; border-left: 4px solid #E0A800; border-radius: var(--radius-sm); color: var(--ink); font-size: .92rem; line-height: 1.6; }
+.info-bayar i { color: #B88700; margin-top: 3px; }
+.form-actions button[type="submit"]:disabled { opacity: .5; cursor: not-allowed; filter: grayscale(.3); }
 #bayarUploadField .upload-label { width: 100%; min-height: 76px; box-sizing: border-box; }
 #bayarUploadField .upload-label span { flex: 1; min-width: 0; line-height: 1.5; }
 #bayarUploadField input[type="file"] { max-width: 100%; }
@@ -1056,13 +1059,17 @@ a.contact-item:hover { transform: translateY(-4px); box-shadow: var(--shadow-sof
         </div>
       </fieldset>
 
-      <!-- Upload bukti pembayaran; opsional untuk pengiriman data awal -->
+      <!-- Upload bukti pembayaran; wajib untuk tombol Kirim Pendaftaran (opsional untuk jalur WhatsApp) -->
       <fieldset class="form-block">
         <legend><i class="fa-solid fa-receipt"></i> BUKTI PEMBAYARAN</legend>
+        <div class="info-bayar" role="note">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>Jika ingin melakukan registrasi / pendaftaran MAKESTA, silakan kirim konfirmasi pembayaran terlebih dahulu ke pihak panitia, atau kirim formulir pendaftaran via WhatsApp terlebih dahulu agar nanti ditindaklanjuti oleh panitia.</span>
+        </div>
         <div class="upload-field" id="bayarUploadField">
           <label for="buktiPembayaran" class="upload-label">
             <i class="fa-solid fa-cloud-arrow-up"></i>
-            <span>Unggah foto bukti pembayaran (JPG/PNG, maks. 2MB). Dapat dilengkapi setelah pendaftaran.</span>
+            <span>Unggah foto bukti pembayaran (JPG/PNG, maks. 2MB) *</span>
           </label>
           <input type="file" id="buktiPembayaran" name="buktiPembayaran" accept="image/png, image/jpeg">
           <span class="error-msg"></span>
@@ -1197,6 +1204,7 @@ a.contact-item:hover { transform: translateY(-4px); box-shadow: var(--shadow-sof
 <!-- Notifikasi toast -->
 <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
   const hamburger = document.getElementById('hamburger');
@@ -1231,6 +1239,18 @@ document.addEventListener('DOMContentLoaded', () => {
   // Ubah username Instagram di sini kalau akun berubah
   const igUsername = 'pripnuippnujenggot';
 
+  // ===== SUPABASE =====
+  // Isi SUPABASE_KEY dengan anon public key (Project Settings > API). JANGAN pakai service_role.
+  const SUPABASE_URL = 'https://moijkweyopyrvsqvndjv.supabase.co';
+  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1vaWprd2V5b3B5cnZzcXZuZGp2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA1Mjk1MjUsImV4cCI6MjEwNjEwNTUyNX0.T49ucdCeCWJIH_FLPV0fFyiGQIjBcDOzFdvsPSb6OYU';
+  const supabaseClient = (window.supabase && !SUPABASE_KEY.startsWith('PASTE_'))
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        // Peserta TIDAK perlu login/izin apa pun: semua pengiriman memakai anon key secara publik.
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+      })
+    : null;
+  if (!supabaseClient) console.warn('Supabase belum aktif: isi SUPABASE_KEY dengan anon public key.');
+
   const setContactLinks = () => {
     const waHref = `https://wa.me/${waNumber}`;
     const igHref = `https://instagram.com/${igUsername.replace('@', '')}`;
@@ -1249,7 +1269,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clearTimeout(showToast.timeoutId);
     showToast.timeoutId = setTimeout(() => {
       toast.className = 'toast';
-    }, 2600);
+    }, type === 'error' ? 7000 : 2600);
   };
 
   if (hamburger && navLinks) {
@@ -1351,8 +1371,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const waveSelect = document.getElementById('gelombangPendaftaran');
   const waveInfo = document.getElementById('gelombangInfo');
 
-  const getWave1Count = () => Number(localStorage.getItem('makeStaGelombang1Count') || 0);
-  const setWave1Count = (count) => localStorage.setItem('makeStaGelombang1Count', String(count));
+  let wave1Count = Number(localStorage.getItem('makeStaGelombang1Count') || 0);
+  const getWave1Count = () => wave1Count;
+  const setWave1Count = (count) => {
+    wave1Count = count;
+    if (!supabaseClient) localStorage.setItem('makeStaGelombang1Count', String(count));
+  };
 
   const updateWaveInfo = () => {
     if (!waveSelect || !waveInfo) return;
@@ -1374,6 +1398,26 @@ document.addEventListener('DOMContentLoaded', () => {
       waveInfo.textContent = `Gelombang 1 tersisa ${remaining} kursi dari 20 peserta. Pendaftaran tanpa batas waktu sampai kuota penuh.`;
     }
   };
+
+  // Kuota Gelombang 1 real-time dari Supabase
+  const syncKuota = async () => {
+    if (!supabaseClient) return;
+    const { data, error } = await supabaseClient
+      .from('kuota_gelombang').select('terisi').eq('gelombang', 'gelombang-1').single();
+    if (!error && data) { wave1Count = data.terisi; updateWaveInfo(); }
+  };
+  if (supabaseClient) {
+    syncKuota();
+    supabaseClient
+      .channel('kuota-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kuota_gelombang' }, (payload) => {
+        if (payload.new && payload.new.gelombang === 'gelombang-1') {
+          wave1Count = payload.new.terisi;
+          updateWaveInfo();
+        }
+      })
+      .subscribe();
+  }
 
   const fields = ['namaLengkap', 'tempatLahir', 'tanggalLahir', 'jenisKelamin', 'alamat', 'desa', 'kecamatan', 'noWhatsapp', 'asalSekolah', 'kelas', 'namaOrtu', 'noWaOrtu', 'pilihanMakesta', 'gelombangPendaftaran', 'alasanMakesta'];
   fields.forEach((fieldName) => {
@@ -1487,13 +1531,83 @@ document.addEventListener('DOMContentLoaded', () => {
     linkGrupWhatsApp.style.pointerEvents = ready ? 'auto' : 'none';
     linkGrupWhatsApp.setAttribute('aria-disabled', String(!ready));
     linkGrupWhatsApp.tabIndex = ready ? 0 : -1;
+    const btnKirim = form?.querySelector('button[type="submit"]');
+    if (btnKirim) {
+      btnKirim.disabled = !ready;
+      btnKirim.title = ready ? '' : 'Unggah bukti pembayaran terlebih dahulu, atau daftar lewat WhatsApp.';
+    }
     if (statusGrupWA) statusGrupWA.textContent = ready
       ? 'Bukti pembayaran terunggah. Link grup WhatsApp sudah aktif.'
       : 'Link grup akan aktif setelah bukti pembayaran diunggah.';
   };
   updateGroupLink();
 
-  form.addEventListener('submit', (event) => {
+  const uploadBerkas = async (folder, nama, input, gagal) => {
+    const file = input?.files?.[0];
+    if (!file) return null;
+    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const path = `${folder}/${nama}.${ext}`;
+    try {
+      const { error } = await supabaseClient.storage.from('berkas')
+        .upload(path, file, { contentType: file.type, upsert: false });
+      if (error) throw error;
+      return path;
+    } catch (err) {
+      // Data pendaftar tetap dikirim walau berkas gagal diunggah.
+      console.error(`Upload ${nama} gagal:`, err);
+      gagal.push(nama);
+      return null;
+    }
+  };
+
+  const buatNoPendaftaran = () =>
+    `MK-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 90000) + 10000)}`;
+
+  // Mengirim data pendaftar langsung ke Supabase (publik, tanpa login/izin).
+  // Mengembalikan { registrationId, berkasGagal }.
+  const simpanKeSupabase = async () => {
+    const folder = (window.crypto?.randomUUID?.() || String(Date.now()) + Math.random().toString(36).slice(2));
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const berkasGagal = [];
+    const fotoPath = await uploadBerkas(folder, 'foto', fileInput, berkasGagal);
+    const izinPath = await uploadBerkas(folder, 'surat-izin', suratIzinInput, berkasGagal);
+    const bayarPath = await uploadBerkas(folder, 'bukti-bayar', buktiPembayaranInput, berkasGagal);
+
+    const baris = {
+      nama_lengkap: val('namaLengkap'),
+      tempat_lahir: val('tempatLahir'),
+      tanggal_lahir: val('tanggalLahir') || null,
+      jenis_kelamin: val('jenisKelamin'),
+      alamat: val('alamat'),
+      desa: val('desa'),
+      kecamatan: val('kecamatan'),
+      no_whatsapp: val('noWhatsapp'),
+      email: val('email') || null,
+      asal_sekolah: val('asalSekolah') || null,
+      kelas: val('kelas') || null,
+      nama_ortu: val('namaOrtu'),
+      no_wa_ortu: val('noWaOrtu'),
+      pilihan_makesta: val('pilihanMakesta'),
+      gelombang: val('gelombangPendaftaran'),
+      alasan: val('alasanMakesta'),
+      riwayat_organisasi: val('riwayatOrganisasi') || null,
+      foto_path: fotoPath,
+      surat_izin_path: izinPath,
+      bukti_bayar_path: bayarPath
+    };
+
+    // Jika nomor pendaftaran kebetulan kembar (kode 23505), buat nomor baru & coba lagi.
+    for (let percobaan = 0; percobaan < 6; percobaan++) {
+      const registrationId = buatNoPendaftaran();
+      const { error } = await supabaseClient.from('pendaftar')
+        .insert({ no_pendaftaran: registrationId, ...baris });
+      if (!error) return { registrationId, berkasGagal };
+      if (error.code !== '23505' || /penuh/i.test(error.message || '')) throw error;
+    }
+    throw new Error('Gagal membuat nomor pendaftaran unik, silakan coba lagi.');
+  };
+
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
 
     let isValid = true;
@@ -1505,6 +1619,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!validateFile()) isValid = false;
     if (!validateSuratIzin()) isValid = false;
     validateBuktiPembayaran();
+
+    if (!buktiPembayaranInput?.files?.length) {
+      showToast('Unggah bukti pembayaran dulu, atau kirim formulir via WhatsApp agar ditindaklanjuti panitia.', 'error');
+      document.getElementById('bayarUploadField')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
 
     if (waveSelect && waveSelect.value === 'gelombang-1' && getWave1Count() >= WAVE1_LIMIT) {
       isValid = false;
@@ -1519,14 +1639,37 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (waveSelect && waveSelect.value === 'gelombang-1') {
-      const newCount = getWave1Count() + 1;
-      setWave1Count(newCount);
+    let registrationId = buatNoPendaftaran();
+    let berkasGagal = [];
+
+    if (supabaseClient) {
+      const submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        ({ registrationId, berkasGagal } = await simpanKeSupabase());
+        await syncKuota();
+      } catch (err) {
+        console.error('Gagal menyimpan ke Supabase:', err);
+        const penuh = /penuh/i.test(err?.message || '');
+        const pesanAsli = String(err?.message || err?.error_description || err || '');
+        let alasan = pesanAsli;
+        if (/Could not find the table|does not exist|PGRST205|42P01/i.test(pesanAsli)) alasan = 'Database belum siap. Hubungi panitia (admin perlu menjalankan supabase-setup.sql).';
+        else if (/row-level security|violates|not authorized|403/i.test(pesanAsli)) alasan = 'Akses database belum dibuka. Hubungi panitia (admin perlu menjalankan ulang supabase-setup.sql).';
+        else if (/Failed to fetch|NetworkError|Load failed/i.test(pesanAsli)) alasan = 'Tidak bisa terhubung ke server. Periksa koneksi internet lalu coba lagi.';
+        showToast(penuh ? 'Gelombang 1 sudah penuh. Pilih Gelombang 2.' : `Gagal mengirim: ${alasan}`, 'error');
+        if (penuh) await syncKuota();
+        updateGroupLink();
+        return;
+      }
+      updateGroupLink();
+    } else if (waveSelect && waveSelect.value === 'gelombang-1') {
+      setWave1Count(getWave1Count() + 1);
       updateWaveInfo();
     }
-
-    const registrationId = `MK-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
     regNumber.textContent = registrationId;
+    if (berkasGagal.length) {
+      showToast('Data terkirim, tetapi sebagian berkas gagal diunggah. Kirim ulang berkas ke panitia via WhatsApp dengan menyebut nomor pendaftaran.', 'error');
+    }
 
     const summaryEntries = [
       ['Nama Lengkap', document.getElementById('namaLengkap').value],
@@ -1706,7 +1849,5 @@ Wassalamu'alaikum Wr. Wb.`;
   setContactLinks();
 });
 </script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script> const SUPABASE_URL = "https://moijkweyopyrvsqvndjv.supabase.co/rest/v1/"; const SUPABASE_KEY = "sb_publishable_pLzU0QfKzlY5W6YC4TTBeA_X3c0dNvz"; const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); </script>.
 </body>
 </html>
